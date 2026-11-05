@@ -1,0 +1,7 @@
+std_msgs/Header header
+string trajectory
+string joint_name
+float64 position_rad
+float64 velocity_rad_s
+float64 acceleration_rad_s2
+bool acceleration_valid

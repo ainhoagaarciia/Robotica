@@ -1,0 +1,41 @@
+<?xml version="1.0"?>
+<robot xmlns:xacro="http://wiki.ros.org/xacro">
+  <!--
+    Macro para colocar un UR3e + RG2 calibrado con un prefijo ("203_", "204_", ...).
+    Incluye también su instancia de ros2_control (hardware simulado o real).
+  -->
+  <xacro:include filename="$(find ur_description)/urdf/ur_macro.xacro"/>
+  <xacro:include filename="$(find ur_robot_driver)/urdf/ur.ros2_control.xacro"/>
+  <xacro:include filename="$(find launcher_robots_lab_robotica)/urdf/rg2.urdf.xacro"/>
+
+  <xacro:macro name="ur3e_rg2_lab" params="id x y yaw robot_ip:=0.0.0.0 reverse_port:=50001 script_sender_port:=50002 trajectory_port:=50003 use_mock_hardware:=true">
+    <xacro:ur_robot
+      name="ur3e_${id}"
+      tf_prefix="${id}_"
+      parent="world"
+      joint_limits_parameters_file="$(find ur_description)/config/ur3e/joint_limits.yaml"
+      kinematics_parameters_file="$(find launcher_robots_lab_robotica)/calibration/calibration_${id}.yaml"
+      physical_parameters_file="$(find ur_description)/config/ur3e/physical_parameters.yaml"
+      visual_parameters_file="$(find ur_description)/config/ur3e/visual_parameters.yaml">
+      <!-- El UR de serie ya incluye un giro de pi entre base_link y base_link_inertia -->
+      <origin xyz="${x} ${y} 0" rpy="0 0 ${yaw - pi}"/>
+    </xacro:ur_robot>
+    <xacro:rg2 prefix="${id}_"/>
+
+    <xacro:ur_ros2_control
+      name="ur3e_${id}"
+      tf_prefix="${id}_"
+      kinematics_parameters_file="$(find launcher_robots_lab_robotica)/calibration/calibration_${id}.yaml"
+      use_mock_hardware="${use_mock_hardware}"
+      initial_positions="${xacro.load_yaml('$(find ur_description)/config/initial_positions.yaml')}"
+      robot_ip="${robot_ip}"
+      script_filename="$(find ur_client_library)/resources/external_control.urscript"
+      output_recipe_filename="$(find ur_robot_driver)/resources/rtde_output_recipe.txt"
+      input_recipe_filename="$(find ur_robot_driver)/resources/rtde_input_recipe.txt"
+      reverse_port="${reverse_port}"
+      script_sender_port="${script_sender_port}"
+      trajectory_port="${trajectory_port}"
+      ur_type="ur3e"
+    />
+  </xacro:macro>
+</robot>

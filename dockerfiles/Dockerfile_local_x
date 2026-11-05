@@ -1,0 +1,55 @@
+FROM ros:jazzy
+
+ENV DEBIAN_FRONTEND=noninteractive
+
+RUN apt-get update && apt-get install -y \
+         ros-jazzy-desktop \
+         ros-jazzy-moveit \
+         ros-jazzy-ur \
+         ros-jazzy-ur-robot-driver \
+         ros-jazzy-usb-cam \
+         ros-jazzy-image-tools \
+         ros-jazzy-rqt-image-view \
+         ros-jazzy-cv-bridge \
+         ros-jazzy-control-msgs \
+         ros-jazzy-xacro \
+         ros-jazzy-rmw-cyclonedds-cpp \
+         python3-colcon-common-extensions \
+         python3-rosdep \
+         python3-opencv \
+         python3-pip \
+         python-is-python3 \
+         curl \
+         apt-utils \
+         net-tools \
+         nmap \
+         xauth \
+         git \
+         htop \
+         sudo
+
+RUN pip install --break-system-packages tensorboard
+
+# ur_rtde (solo necesario para la pinza real). En x86 hay rueda precompilada; en ARM
+# (Raspberry, Mac con Apple Silicon...) se compila desde código. Si falla, la simulación sigue funcionando.
+RUN apt-get update && apt-get install -y --no-install-recommends cmake libboost-all-dev python3-dev && \
+    (pip install --break-system-packages ur_rtde || echo "AVISO: no se pudo instalar ur_rtde; la pinza real no estará disponible") && \
+    rm -rf /var/lib/apt/lists/*
+
+# La imagen base de Ubuntu 24.04 trae un usuario "ubuntu" con uid 1000
+RUN (userdel -r ubuntu || true) && \
+    (groupdel ubuntu || true) && \
+    rm -rf /var/lib/apt/lists/* && \
+    groupadd -g 1000 laboratorio && \
+    useradd -ms /bin/bash laboratorio -u 1000 -g 1000 && \
+    echo "laboratorio ALL=(ALL) NOPASSWD: ALL" >> /etc/sudoers && \
+    echo "source /opt/ros/jazzy/setup.bash" >> /home/laboratorio/.bashrc && \
+    echo "[ -f ~/ros_workspace/install/setup.bash ] && source ~/ros_workspace/install/setup.bash" >> /home/laboratorio/.bashrc && \
+    echo 'laboratorio:laboratorio' | chpasswd && \
+    chown laboratorio:laboratorio /home/laboratorio && \
+    mkdir -p /var/run/laboratorio/1000 && \
+    chown laboratorio:laboratorio /var/run/laboratorio/1000
+
+USER laboratorio
+
+ENTRYPOINT [ "sleep", "infinity"]
