@@ -1,0 +1,15 @@
+<?xml version="1.0"?>
+<robot xmlns:xacro="http://wiki.ros.org/xacro" name="doble_ur3e_203_204">
+  <xacro:include filename="$(find launcher_robots_lab_robotica)/urdf/ur3e_rg2_lab.macro.xacro"/>
+
+  <xacro:arg name="use_mock_hardware" default="true"/>
+
+  <link name="world"/>
+
+  <xacro:ur3e_rg2_lab id="203" x="0" y="0" yaw="0.785398163"
+    use_mock_hardware="$(arg use_mock_hardware)"
+    robot_ip="10.172.21.203" reverse_port="50030" script_sender_port="50031" trajectory_port="50032"/>
+  <xacro:ur3e_rg2_lab id="204" x="0.0051" y="-0.9" yaw="2.502802148"
+    use_mock_hardware="$(arg use_mock_hardware)"
+    robot_ip="10.172.21.204" reverse_port="50040" script_sender_port="50041" trajectory_port="50042"/>
+</robot>

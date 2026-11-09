@@ -1,0 +1,79 @@
+services:
+  # Servicio por defecto: funciona en Windows, macOS y Linux (x86 y ARM).
+  # El escritorio se ve desde el navegador en http://localhost:6081
+  desktop:
+    image: mucsi_26_27_desktop_novnc
+    build:
+      context: .
+      dockerfile: dockerfiles/Dockerfile_novnc
+    shm_size: 2gb
+    # Límites para que un consumo excesivo no bloquee el equipo anfitrión
+    mem_limit: ${LAB_MEM:-8g}
+    memswap_limit: ${LAB_MEM:-8g}
+    cpus: ${LAB_CPUS:-4}
+    pids_limit: 4096
+    volumes:
+      - ./ros_workspace:/home/laboratorio/ros_workspace
+    ports:
+      - 6081:6081
+      - 5901:5901
+    environment:
+      - TZ=UTC
+      - SIZEW=1920
+      - SIZEH=1080
+      - REFRESH=60
+      - DPI=96
+      - CDEPTH=24
+      - NOVNC_ENABLE=true
+      - RESOLUTION=1920x1080x24
+      - NOVNC_PORT=6081
+      - VNC_PORT=5901
+  # Perfiles opcionales solo para los PCs del laboratorio (Linux con X11)
+  local_laboratorio_gpu:
+    image: mucsi_26_27_local_laboratorio_gpu
+    build:
+      context: .
+      dockerfile: dockerfiles/Dockerfile_local_x
+    privileged: true
+    network_mode: host
+    ipc: host
+    profiles:
+      - local_gpu
+    volumes:
+      - ./ros_workspace:/home/laboratorio/ros_workspace
+      - /tmp/.X11-unix:/tmp/.X11-unix
+      - ${XAUTHORITY:-0}:/root/.Xauthority
+      - /dev:/dev
+    tmpfs:
+      - /dev/shm:rw
+    environment:
+      - DISPLAY=${DISPLAY:-0}
+      - LD_LIBRARY_PATH=/usr/local/nvidia/lib64
+      - NVIDIA_VISIBLE_DEVICES=all
+      - NVIDIA_DRIVER_CAPABILITIES=compute,utility
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+  local_laboratorio:
+    image: mucsi_26_27_local_laboratorio
+    build:
+      context: .
+      dockerfile: dockerfiles/Dockerfile_local_x
+    privileged: true
+    network_mode: host
+    ipc: host
+    profiles:
+      - local
+    volumes:
+      - ./ros_workspace:/home/laboratorio/ros_workspace
+      - /tmp/.X11-unix:/tmp/.X11-unix
+      - ${XAUTHORITY:-0}:/root/.Xauthority
+      - /dev:/dev
+    tmpfs:
+      - /dev/shm:rw
+    environment:
+      - DISPLAY=${DISPLAY:-0}

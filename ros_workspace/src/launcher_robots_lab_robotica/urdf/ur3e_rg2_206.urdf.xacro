@@ -1,0 +1,6 @@
+<?xml version="1.0"?>
+<robot xmlns:xacro="http://wiki.ros.org/xacro" name="$(arg name)">
+  <!-- Giro (yaw) del robot 206 respecto al sistema de referencia "world", medido en el laboratorio -->
+  <xacro:property name="mount_yaw" value="3.141592653589793"/>
+  <xacro:include filename="$(find launcher_robots_lab_robotica)/urdf/ur3e_rg2_comun.urdf.xacro"/>
+</robot>

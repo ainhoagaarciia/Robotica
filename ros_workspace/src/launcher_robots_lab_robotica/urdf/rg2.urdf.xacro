@@ -1,0 +1,107 @@
+<?xml version="1.0"?>
+<robot xmlns:xacro="http://wiki.ros.org/xacro">
+  <!--
+    Pinza OnRobot RG2. Se monta sobre el frame "${prefix}tool0" del robot UR.
+    Los nombres de las articulaciones y de los links son los mismos que en la versión ROS 1.
+  -->
+  <xacro:macro name="inercia_rg2" params="masa">
+    <inertial>
+      <origin rpy="0 0 0" xyz="0.0 0.0 0.0"/>
+      <mass value="${masa}"/>
+      <inertia ixx="1.0E-03" ixy="1.0E-06" ixz="1.0E-06" iyy="1.0E-03" iyz="1.0E-06" izz="1.0E-03"/>
+    </inertial>
+  </xacro:macro>
+
+  <xacro:macro name="link_rg2" params="nombre malla masa prefix color">
+    <link name="${prefix}${nombre}">
+      <xacro:inercia_rg2 masa="${masa}"/>
+      <visual>
+        <origin rpy="0 0 0" xyz="0 0 0"/>
+        <geometry>
+          <mesh filename="package://launcher_robots_lab_robotica/meshes/visual/${malla}.stl"/>
+        </geometry>
+        <xacro:if value="${color == 'gris'}">
+          <material name="rg2_grey">
+            <color rgba="0.8 0.8 0.8 1"/>
+          </material>
+        </xacro:if>
+        <xacro:unless value="${color == 'gris'}">
+          <material name="rg2_black">
+            <color rgba="0.1 0.1 0.1 1"/>
+          </material>
+        </xacro:unless>
+      </visual>
+      <collision>
+        <origin rpy="0 0 0" xyz="0 0 0"/>
+        <geometry>
+          <mesh filename="package://launcher_robots_lab_robotica/meshes/collision/${malla}.stl"/>
+        </geometry>
+      </collision>
+    </link>
+  </xacro:macro>
+
+  <xacro:macro name="rg2" params="prefix:=''">
+    <joint name="${prefix}joint0" type="fixed">
+      <parent link="${prefix}tool0"/>
+      <child link="${prefix}onrobot_rg2_base_link"/>
+      <!-- El tool0 de ROS 2 está girado respecto al de ROS 1: se compensa para conservar la misma orientación -->
+      <origin rpy="0.0 0.0 ${-pi/2}" xyz="0 0 0"/>
+    </joint>
+
+    <xacro:link_rg2 nombre="onrobot_rg2_base_link" malla="base_link" masa="0.7" prefix="${prefix}" color="gris"/>
+    <xacro:link_rg2 nombre="left_outer_knuckle" malla="outer_knuckle" masa="0.05" prefix="${prefix}" color="gris"/>
+    <xacro:link_rg2 nombre="left_inner_knuckle" malla="inner_knuckle" masa="0.05" prefix="${prefix}" color="gris"/>
+    <xacro:link_rg2 nombre="left_inner_finger" malla="inner_finger" masa="0.05" prefix="${prefix}" color="negro"/>
+    <xacro:link_rg2 nombre="right_outer_knuckle" malla="outer_knuckle" masa="0.05" prefix="${prefix}" color="gris"/>
+    <xacro:link_rg2 nombre="right_inner_knuckle" malla="inner_knuckle" masa="0.05" prefix="${prefix}" color="gris"/>
+    <xacro:link_rg2 nombre="right_inner_finger" malla="inner_finger" masa="0.05" prefix="${prefix}" color="negro"/>
+
+    <joint name="${prefix}finger_joint" type="revolute">
+      <origin rpy="0 0 0" xyz="0 -0.017178 0.125797"/>
+      <parent link="${prefix}onrobot_rg2_base_link"/>
+      <child link="${prefix}left_outer_knuckle"/>
+      <axis xyz="-1 0 0"/>
+      <limit effort="1000" lower="-0.558505" upper="0.785398" velocity="100.0"/>
+    </joint>
+    <joint name="${prefix}left_inner_knuckle_joint" type="revolute">
+      <origin rpy="0 0 0.0" xyz="0 -0.007678 0.1422970"/>
+      <parent link="${prefix}onrobot_rg2_base_link"/>
+      <child link="${prefix}left_inner_knuckle"/>
+      <axis xyz="1 0 0"/>
+      <limit effort="1000" lower="-0.785398" upper="0.785398" velocity="100.0"/>
+      <mimic joint="${prefix}finger_joint" multiplier="-1" offset="0"/>
+    </joint>
+    <joint name="${prefix}left_inner_finger_joint" type="revolute">
+      <origin rpy="0 0 0" xyz="0 -0.039592 0.038177000000000016"/>
+      <parent link="${prefix}left_outer_knuckle"/>
+      <child link="${prefix}left_inner_finger"/>
+      <axis xyz="1 0 0"/>
+      <limit effort="1000" lower="-0.872665" upper="0.872665" velocity="100.0"/>
+      <mimic joint="${prefix}finger_joint" multiplier="1" offset="0"/>
+    </joint>
+    <joint name="${prefix}right_outer_knuckle_joint" type="revolute">
+      <origin rpy="0 0 ${pi}" xyz="0 0.017178 0.125797"/>
+      <parent link="${prefix}onrobot_rg2_base_link"/>
+      <child link="${prefix}right_outer_knuckle"/>
+      <axis xyz="1 0 0"/>
+      <limit effort="1000" lower="-0.785398" upper="0.785398" velocity="100.0"/>
+      <mimic joint="${prefix}finger_joint" multiplier="-1" offset="0"/>
+    </joint>
+    <joint name="${prefix}right_inner_knuckle_joint" type="revolute">
+      <origin rpy="0 0 ${-pi}" xyz="0 0.007678 0.1422970"/>
+      <parent link="${prefix}onrobot_rg2_base_link"/>
+      <child link="${prefix}right_inner_knuckle"/>
+      <axis xyz="1 0 0"/>
+      <limit effort="1000" lower="-0.785398" upper="0.785398" velocity="100.0"/>
+      <mimic joint="${prefix}finger_joint" multiplier="-1" offset="0"/>
+    </joint>
+    <joint name="${prefix}right_inner_finger_joint" type="revolute">
+      <origin rpy="0 0 0" xyz="0 -0.039592 0.038177000000000016"/>
+      <parent link="${prefix}right_outer_knuckle"/>
+      <child link="${prefix}right_inner_finger"/>
+      <axis xyz="1 0 0"/>
+      <limit effort="1000" lower="-0.872665" upper="0.872665" velocity="100.0"/>
+      <mimic joint="${prefix}finger_joint" multiplier="1" offset="0"/>
+    </joint>
+  </xacro:macro>
+</robot>

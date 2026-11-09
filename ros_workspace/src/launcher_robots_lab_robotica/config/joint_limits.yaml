@@ -1,0 +1,43 @@
+# Estos límites aumentan/sobrescriben los definidos en el URDF (ur_description).
+# Para empezar se reducen la velocidad y la aceleración al 10 %.
+# Se pueden pedir factores más altos (<= 1.0) en cada petición de movimiento.
+default_velocity_scaling_factor: 0.1
+default_acceleration_scaling_factor: 0.1
+
+joint_limits:
+  shoulder_pan_joint:
+    has_acceleration_limits: true
+    max_acceleration: 5.0
+  shoulder_lift_joint:
+    has_acceleration_limits: true
+    max_acceleration: 5.0
+  elbow_joint:
+    has_acceleration_limits: true
+    max_acceleration: 5.0
+  wrist_1_joint:
+    has_acceleration_limits: true
+    max_acceleration: 5.0
+  wrist_2_joint:
+    has_acceleration_limits: true
+    max_acceleration: 5.0
+  wrist_3_joint:
+    has_acceleration_limits: true
+    max_acceleration: 5.0
+  finger_joint:
+    has_acceleration_limits: true
+    max_acceleration: 10.0
+  left_inner_knuckle_joint:
+    has_acceleration_limits: true
+    max_acceleration: 10.0
+  left_inner_finger_joint:
+    has_acceleration_limits: true
+    max_acceleration: 10.0
+  right_outer_knuckle_joint:
+    has_acceleration_limits: true
+    max_acceleration: 10.0
+  right_inner_knuckle_joint:
+    has_acceleration_limits: true
+    max_acceleration: 10.0
+  right_inner_finger_joint:
+    has_acceleration_limits: true
+    max_acceleration: 10.0
