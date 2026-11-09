@@ -3,3 +3,6 @@ install/
 log/
 __pycache__/
 *.pyc
+
+# Datos generados durante las ejecuciones
+ros_workspace/datos_trayectorias/*.csv
