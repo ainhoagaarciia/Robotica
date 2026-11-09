@@ -4,3 +4,6 @@ log/
 __pycache__/
 *.pyc
 
+
+# Datos generados por las simulaciones
+ros_workspace/datos_trayectorias/
