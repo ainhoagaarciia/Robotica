@@ -4,3 +4,15 @@ log/
 __pycache__/
 *.pyc
 
+.pytest_cache/
+*.egg-info/
+
+# Sistema operativo y editores
+.DS_Store
+.vscode/
+
+# Datos generados al ejecutar los nodos de la práctica 2
+# (se conservan las carpetas mediante los .gitkeep)
+ros_workspace/src/vision_camara/datos/imagenes/*
+ros_workspace/src/vision_camara/datos/mediciones/*
+!ros_workspace/src/vision_camara/datos/**/.gitkeep
