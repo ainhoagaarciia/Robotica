@@ -1,0 +1,18 @@
+usb_cam:
+  ros__parameters:
+    # Dispositivo de captura
+    video_device: "/dev/video0"
+    camera_name: "camara_practica2"
+    frame_id: "camera"
+
+    # Configuracion de imagen
+    image_width: 640
+    image_height: 480
+    framerate: 30.0
+
+    # Formato y metodo de captura
+    pixel_format: "yuyv"
+    io_method: "mmap"
+
+    # Calibracion pendiente
+    camera_info_url: ""
