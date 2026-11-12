@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 
 """Nodo ROS 2 para ejecutar trayectorias y registrar estados articulares."""
+import copy
 import csv
 import math
 import threading
@@ -8,28 +9,40 @@ import time
 from datetime import datetime
 from pathlib import Path
 from typing import Any, TypedDict
+from geometry_msgs.msg import Pose
 from moveit_msgs.action import ExecuteTrajectory, MoveGroup
 from moveit_msgs.msg import Constraints, JointConstraint, MoveItErrorCodes, RobotTrajectory
+from moveit_msgs.srv import GetCartesianPath
 import rclpy
 from rclpy.action import ActionClient
+from rclpy.duration import Duration
 from rclpy.executors import SingleThreadedExecutor
 from rclpy.node import Node
+from rclpy.time import Time
 from sensor_msgs.msg import JointState
+from tf2_ros import Buffer, TransformListener
 JOINTS = ['shoulder_pan_joint', 'shoulder_lift_joint', 'elbow_joint', 'wrist_1_joint', 'wrist_2_joint', 'wrist_3_joint']
+REFERENCE_FRAME = 'world'
+END_EFFECTOR_LINK = 'wrist_3_link'
 JOINT_STATES_TOPIC = '/joint_states'
 MOVE_GROUP_ACTION = 'move_action'
 EXECUTE_TRAJECTORY_ACTION = 'execute_trajectory'
+CARTESIAN_PATH_SERVICE = 'compute_cartesian_path'
 PLANNING_GROUP = 'robot'
 MESSAGE_QUEUE_SIZE = 10
 ACTION_SERVER_TIMEOUT_SEC = 30.0
 STATE_WAIT_TIMEOUT_SEC = 20.0
 STATE_POLL_INTERVAL_SEC = 0.05
+TRANSFORM_TIMEOUT_SEC = 5.0
 FUTURE_POLL_INTERVAL_SEC = 0.01
 CAPTURE_SETTLE_TIME_SEC = 0.2
 TRAJECTORY_SETTLE_TIME_SEC = 0.1
 VELOCITY_SCALE = 0.1
 ACCELERATION_SCALE = 0.1
 JOINT_GOAL_TOLERANCE_RAD = 0.01
+CARTESIAN_MAX_STEP_M = 0.001
+CARTESIAN_MIN_FRACTION = 0.999
+LINEAR_OFFSET_M = 0.01
 INITIAL_JOINT_TARGET_RAD = [0.0, -math.pi / 2, -math.pi / 2, -math.pi / 2, math.pi / 2, 0.0]
 
 class MuestraArticular(TypedDict):
@@ -40,11 +53,12 @@ class MuestraArticular(TypedDict):
     articulacion: str
     posicion_rad: float
     velocidad_rad_s: float | None
+RutaCartesiana = tuple[str, list[Pose]]
 
 class CapturadorTrayectorias(Node):
 
     def __init__(self) -> None:
-        """Prepara la captura Joint con MoveIt."""
+        """Prepara MoveIt, TF2 y el almacenamiento de datos."""
         super().__init__('capturador_trayectorias')
         self._lock = threading.Lock()
         self._estado: dict[str, float] = {}
@@ -54,11 +68,16 @@ class CapturadorTrayectorias(Node):
         self.create_subscription(JointState, JOINT_STATES_TOPIC, self._al_recibir_estado, MESSAGE_QUEUE_SIZE)
         self._move_group = ActionClient(self, MoveGroup, MOVE_GROUP_ACTION)
         self._execute = ActionClient(self, ExecuteTrajectory, EXECUTE_TRAJECTORY_ACTION)
+        self._cartesian = self.create_client(GetCartesianPath, CARTESIAN_PATH_SERVICE)
+        self._tf_buffer = Buffer()
+        self._tf_listener = TransformListener(self._tf_buffer, self)
         self.get_logger().info('Esperando los servicios y acciones de MoveIt...')
         if not self._move_group.wait_for_server(timeout_sec=ACTION_SERVER_TIMEOUT_SEC):
             raise RuntimeError('No se encontró la acción move_action. ¿Está activa la simulación?')
         if not self._execute.wait_for_server(timeout_sec=ACTION_SERVER_TIMEOUT_SEC):
             raise RuntimeError('No se encontró la acción execute_trajectory.')
+        if not self._cartesian.wait_for_service(timeout_sec=ACTION_SERVER_TIMEOUT_SEC):
+            raise RuntimeError('No se encontró el servicio compute_cartesian_path.')
 
     def esperar_estado_inicial(self) -> None:
         """Espera hasta recibir el estado de las articulaciones del brazo."""
@@ -136,6 +155,48 @@ class CapturadorTrayectorias(Node):
             raise RuntimeError(f'Falló la planificación articular (código {resultado.error_code.val}).')
         return resultado.planned_trajectory
 
+    def _pose_actual(self) -> Pose:
+        """Obtiene en el frame de referencia la pose actual del efector."""
+        transformacion = self._tf_buffer.lookup_transform(REFERENCE_FRAME, END_EFFECTOR_LINK, Time(), timeout=Duration(seconds=TRANSFORM_TIMEOUT_SEC))
+        pose = Pose()
+        pose.position.x = transformacion.transform.translation.x
+        pose.position.y = transformacion.transform.translation.y
+        pose.position.z = transformacion.transform.translation.z
+        pose.orientation = transformacion.transform.rotation
+        return pose
+
+    def _solicitar_cartesiana(self, poses: list[Pose]) -> GetCartesianPath.Response:
+        """Solicita una ruta cartesiana desde el estado actual del robot."""
+        peticion = GetCartesianPath.Request()
+        peticion.header.frame_id = REFERENCE_FRAME
+        peticion.start_state.joint_state.header.stamp = self.get_clock().now().to_msg()
+        with self._lock:
+            peticion.start_state.joint_state.name = list(JOINTS)
+            peticion.start_state.joint_state.position = [self._estado[nombre] for nombre in JOINTS]
+        peticion.start_state.is_diff = True
+        peticion.group_name = PLANNING_GROUP
+        peticion.link_name = END_EFFECTOR_LINK
+        peticion.waypoints = [self._pose_actual(), *poses]
+        peticion.max_step = CARTESIAN_MAX_STEP_M
+        peticion.jump_threshold = 0.0
+        peticion.avoid_collisions = True
+        peticion.max_velocity_scaling_factor = VELOCITY_SCALE
+        peticion.max_acceleration_scaling_factor = ACCELERATION_SCALE
+        respuesta = self._esperar(self._cartesian.call_async(peticion))
+        return respuesta
+
+    def _planificar_cartesiana(self, candidatas: list[RutaCartesiana]) -> RobotTrajectory:
+        """Selecciona la primera ruta cartesiana que MoveIt completa."""
+        resultados: list[str] = []
+        for descripcion, poses in candidatas:
+            respuesta = self._solicitar_cartesiana(poses)
+            if respuesta.fraction >= CARTESIAN_MIN_FRACTION:
+                self.get_logger().info(f'Recorrido cartesiano planificado: {descripcion}.')
+                return respuesta.solution
+            resultados.append(f'{descripcion}: {respuesta.fraction:.1%} (código {respuesta.error_code.val})')
+        detalle = '; '.join(resultados)
+        raise RuntimeError(f'MoveIt no pudo planificar ninguno de los recorridos cartesianos probados: {detalle}.')
+
     def _ejecutar_y_guardar(self, nombre: str, trayectoria: RobotTrajectory) -> None:
         """Ejecuta una trayectoria y guarda las muestras en un CSV."""
         self._iniciar_captura(nombre)
@@ -170,11 +231,21 @@ class CapturadorTrayectorias(Node):
         print(f'Datos guardados: {ruta} ({len(muestras)} filas)')
 
     def ejecutar_practica(self) -> None:
-        """Planifica y captura Joint."""
+        """Ejecuta y captura Joint y Lineal."""
         self.get_logger().info('Planificando movimiento articular...')
         objetivo = list(INITIAL_JOINT_TARGET_RAD)
         plan_articular = self._planificar_articulaciones(objetivo)
         self._ejecutar_y_guardar('joint', plan_articular)
+        pose = self._pose_actual()
+        lineales: list[RutaCartesiana] = []
+        for eje in ('x', 'y', 'z'):
+            for sentido in (-1.0, 1.0):
+                destino = copy.deepcopy(pose)
+                setattr(destino.position, eje, getattr(pose.position, eje) + sentido * LINEAR_OFFSET_M)
+                descripcion = f'{eje} {sentido * LINEAR_OFFSET_M:.3f} m'
+                lineales.append((descripcion, [destino]))
+        plan_lineal = self._planificar_cartesiana(lineales)
+        self._ejecutar_y_guardar('lineal', plan_lineal)
 
 def main(args: list[str] | None=None) -> None:
     """Inicializa ROS 2, ejecuta la practica y libera sus recursos."""
