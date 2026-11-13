@@ -30,6 +30,7 @@ setup(
     },
     entry_points={
         'console_scripts': [
+            'ingestor_imagenes = vision_camara.ingestor_imagenes:main',
         ],
     },
 )
