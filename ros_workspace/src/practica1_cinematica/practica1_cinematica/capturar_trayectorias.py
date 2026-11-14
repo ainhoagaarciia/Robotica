@@ -43,6 +43,8 @@ JOINT_GOAL_TOLERANCE_RAD = 0.01
 CARTESIAN_MAX_STEP_M = 0.001
 CARTESIAN_MIN_FRACTION = 0.999
 LINEAR_OFFSET_M = 0.01
+CIRCLE_RADIUS_M = 0.01
+CIRCLE_POINT_COUNT = 32
 INITIAL_JOINT_TARGET_RAD = [0.0, -math.pi / 2, -math.pi / 2, -math.pi / 2, math.pi / 2, 0.0]
 
 class MuestraArticular(TypedDict):
@@ -231,7 +233,7 @@ class CapturadorTrayectorias(Node):
         print(f'Datos guardados: {ruta} ({len(muestras)} filas)')
 
     def ejecutar_practica(self) -> None:
-        """Ejecuta y captura Joint y Lineal."""
+        """Ejecuta y captura Joint, Lineal y Circular."""
         self.get_logger().info('Planificando movimiento articular...')
         objetivo = list(INITIAL_JOINT_TARGET_RAD)
         plan_articular = self._planificar_articulaciones(objetivo)
@@ -246,6 +248,36 @@ class CapturadorTrayectorias(Node):
                 lineales.append((descripcion, [destino]))
         plan_lineal = self._planificar_cartesiana(lineales)
         self._ejecutar_y_guardar('lineal', plan_lineal)
+
+        # Dibujamos una circunferencia de 1 cm mediante 32 puntos cartesianos.
+        pose = self._pose_actual()
+        radio = CIRCLE_RADIUS_M
+        circulares: list[RutaCartesiana] = []
+        for eje_a, eje_b, descripcion in (
+            ('x', 'y', 'plano XY'),
+            ('x', 'z', 'plano XZ'),
+            ('y', 'z', 'plano YZ'),
+        ):
+            centro_a = getattr(pose.position, eje_a) + radio
+            puntos: list[Pose] = []
+            for indice in range(1, CIRCLE_POINT_COUNT + 1):
+                angulo = math.pi + 2.0 * math.pi * indice / CIRCLE_POINT_COUNT
+                punto = copy.deepcopy(pose)
+                setattr(
+                    punto.position,
+                    eje_a,
+                    centro_a + radio * math.cos(angulo),
+                )
+                setattr(
+                    punto.position,
+                    eje_b,
+                    getattr(pose.position, eje_b) + radio * math.sin(angulo),
+                )
+                puntos.append(punto)
+            circulares.append((descripcion, puntos))
+
+        plan_circular = self._planificar_cartesiana(circulares)
+        self._ejecutar_y_guardar('circular', plan_circular)
 
 def main(args: list[str] | None=None) -> None:
     """Inicializa ROS 2, ejecuta la practica y libera sus recursos."""
