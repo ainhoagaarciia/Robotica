@@ -1,0 +1,26 @@
+image_width: 640
+image_height: 480
+camera_name: camara_practica2
+camera_matrix:
+  rows: 3
+  cols: 3
+  data: [699.4581 ,   0.     , 304.17071,
+           0.     , 699.15706, 248.70063,
+           0.     ,   0.     ,   1.     ]
+distortion_model: plumb_bob
+distortion_coefficients:
+  rows: 1
+  cols: 5
+  data: [0.026701, -0.082414, -0.000496, 0.003623, 0.000000]
+rectification_matrix:
+  rows: 3
+  cols: 3
+  data: [1., 0., 0.,
+         0., 1., 0.,
+         0., 0., 1.]
+projection_matrix:
+  rows: 3
+  cols: 4
+  data: [700.05994,   0.     , 305.23549,   0.     ,
+           0.     , 700.62915, 248.04404,   0.     ,
+           0.     ,   0.     ,   1.     ,   0.     ]
