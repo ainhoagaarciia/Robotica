@@ -55,18 +55,20 @@ class MuestraArticular(TypedDict):
     articulacion: str
     posicion_rad: float
     velocidad_rad_s: float | None
+    aceleracion_rad_s2: float | None
 RutaCartesiana = tuple[str, list[Pose]]
 
 class CapturadorTrayectorias(Node):
 
     def __init__(self) -> None:
-        """Prepara MoveIt, TF2 y el almacenamiento de datos."""
+        """Prepara la captura articular y las acciones de MoveIt."""
         super().__init__('capturador_trayectorias')
         self._lock = threading.Lock()
         self._estado: dict[str, float] = {}
         self._capturando = False
         self._trayectoria = ''
         self._muestras: list[MuestraArticular] = []
+        self._velocidad_anterior: dict[str, tuple[float, float]] = {}
         self.create_subscription(JointState, JOINT_STATES_TOPIC, self._al_recibir_estado, MESSAGE_QUEUE_SIZE)
         self._move_group = ActionClient(self, MoveGroup, MOVE_GROUP_ACTION)
         self._execute = ActionClient(self, ExecuteTrajectory, EXECUTE_TRAJECTORY_ACTION)
@@ -92,7 +94,7 @@ class CapturadorTrayectorias(Node):
         raise RuntimeError('No llegaron todas las articulaciones por /joint_states.')
 
     def _al_recibir_estado(self, msg: JointState) -> None:
-        """Registra posición y velocidad mientras se captura la trayectoria."""
+        """Registra posición, velocidad y aceleración por articulación."""
         tiempo_ns = msg.header.stamp.sec * 1000000000 + msg.header.stamp.nanosec
         fuente_tiempo = 'joint_states.header.stamp'
         if tiempo_ns == 0:
@@ -109,13 +111,23 @@ class CapturadorTrayectorias(Node):
                 if nombre not in JOINTS or indice >= len(msg.position):
                     continue
                 velocidad = msg.velocity[indice] if indice < len(msg.velocity) else None
-                self._muestras.append({'trayectoria': self._trayectoria, 'tiempo_s': tiempo_s, 'fuente_tiempo': fuente_tiempo, 'articulacion': nombre, 'posicion_rad': msg.position[indice], 'velocidad_rad_s': velocidad})
+                aceleracion: float | None = None
+                if velocidad is not None:
+                    anterior = self._velocidad_anterior.get(nombre)
+                    if anterior is not None:
+                        tiempo_anterior, velocidad_anterior = anterior
+                        dt = tiempo_s - tiempo_anterior
+                        if dt > 0:
+                            aceleracion = (velocidad - velocidad_anterior) / dt
+                    self._velocidad_anterior[nombre] = (tiempo_s, velocidad)
+                self._muestras.append({'trayectoria': self._trayectoria, 'tiempo_s': tiempo_s, 'fuente_tiempo': fuente_tiempo, 'articulacion': nombre, 'posicion_rad': msg.position[indice], 'velocidad_rad_s': velocidad, 'aceleracion_rad_s2': aceleracion})
 
     def _iniciar_captura(self, nombre: str) -> None:
-        """Prepara las muestras de la siguiente trayectoria."""
+        """Prepara las muestras y reinicia el cálculo de aceleraciones."""
         with self._lock:
             self._trayectoria = nombre
             self._muestras = []
+            self._velocidad_anterior = {}
             self._capturando = True
 
     def _terminar_captura(self) -> list[MuestraArticular]:
@@ -220,12 +232,12 @@ class CapturadorTrayectorias(Node):
 
     @staticmethod
     def _guardar_csv(nombre: str, muestras: list[MuestraArticular]) -> None:
-        """Escribe un CSV independiente para la trayectoria."""
+        """Guarda las muestras con aceleración en un CSV."""
         carpeta = Path.home() / 'ros_workspace' / 'datos_trayectorias'
         carpeta.mkdir(parents=True, exist_ok=True)
         marca_tiempo = datetime.now().strftime('%Y%m%d_%H%M%S_%f')
         ruta = carpeta / f'{marca_tiempo}_{nombre}.csv'
-        columnas = ['trayectoria', 'tiempo_s', 'fuente_tiempo', 'articulacion', 'posicion_rad', 'velocidad_rad_s']
+        columnas = ['trayectoria', 'tiempo_s', 'fuente_tiempo', 'articulacion', 'posicion_rad', 'velocidad_rad_s', 'aceleracion_rad_s2']
         with ruta.open('w', newline='', encoding='utf-8') as archivo:
             escritor = csv.DictWriter(archivo, fieldnames=columnas)
             escritor.writeheader()
