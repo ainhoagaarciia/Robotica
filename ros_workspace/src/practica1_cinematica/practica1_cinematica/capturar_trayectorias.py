@@ -45,6 +45,8 @@ CARTESIAN_MIN_FRACTION = 0.999
 LINEAR_OFFSET_M = 0.01
 CIRCLE_RADIUS_M = 0.01
 CIRCLE_POINT_COUNT = 32
+MOVEMENT_VELOCITY_THRESHOLD_RAD_S = 0.001
+MOVEMENT_POSITION_THRESHOLD_RAD = 1e-05
 INITIAL_JOINT_TARGET_RAD = [0.0, -math.pi / 2, -math.pi / 2, -math.pi / 2, math.pi / 2, 0.0]
 
 class MuestraArticular(TypedDict):
@@ -69,6 +71,7 @@ class CapturadorTrayectorias(Node):
         self._trayectoria = ''
         self._muestras: list[MuestraArticular] = []
         self._velocidad_anterior: dict[str, tuple[float, float]] = {}
+        self._estado_anterior: dict[str, tuple[float, float]] = {}
         self.create_subscription(JointState, JOINT_STATES_TOPIC, self._al_recibir_estado, MESSAGE_QUEUE_SIZE)
         self._move_group = ActionClient(self, MoveGroup, MOVE_GROUP_ACTION)
         self._execute = ActionClient(self, ExecuteTrajectory, EXECUTE_TRAJECTORY_ACTION)
@@ -94,33 +97,53 @@ class CapturadorTrayectorias(Node):
         raise RuntimeError('No llegaron todas las articulaciones por /joint_states.')
 
     def _al_recibir_estado(self, msg: JointState) -> None:
-        """Registra posición, velocidad y aceleración por articulación."""
+        """Guarda muestras solo mientras detecta movimiento."""
         tiempo_ns = msg.header.stamp.sec * 1000000000 + msg.header.stamp.nanosec
         fuente_tiempo = 'joint_states.header.stamp'
         if tiempo_ns == 0:
             tiempo_ns = self.get_clock().now().nanoseconds
             fuente_tiempo = 'reloj_ros'
         tiempo_s = tiempo_ns / 1000000000
+        articulaciones: list[tuple[str, float, float | None, float | None]] = []
         with self._lock:
-            for indice, nombre in enumerate(msg.name):
-                if nombre in JOINTS and indice < len(msg.position):
-                    self._estado[nombre] = msg.position[indice]
-            if not self._capturando:
-                return
+            hay_movimiento = False
             for indice, nombre in enumerate(msg.name):
                 if nombre not in JOINTS or indice >= len(msg.position):
                     continue
-                velocidad = msg.velocity[indice] if indice < len(msg.velocity) else None
+                posicion = msg.position[indice]
+                self._estado[nombre] = posicion
+                anterior = self._estado_anterior.get(nombre)
+                velocidad_estimada: float | None = None
                 aceleracion: float | None = None
+                if anterior is not None:
+                    tiempo_anterior, posicion_anterior = anterior
+                    dt = tiempo_s - tiempo_anterior
+                    if dt > 0:
+                        desplazamiento = posicion - posicion_anterior
+                        if abs(desplazamiento) > MOVEMENT_POSITION_THRESHOLD_RAD:
+                            velocidad_estimada = desplazamiento / dt
+                velocidad_mensaje = msg.velocity[indice] if indice < len(msg.velocity) else None
+                velocidad = velocidad_mensaje
+                if velocidad is None or (abs(velocidad) <= MOVEMENT_VELOCITY_THRESHOLD_RAD_S and velocidad_estimada is not None):
+                    velocidad = velocidad_estimada
+                articulacion_en_movimiento = velocidad is not None and abs(velocidad) > MOVEMENT_VELOCITY_THRESHOLD_RAD_S
+                hay_movimiento = hay_movimiento or articulacion_en_movimiento
+                velocidad_previa = self._velocidad_anterior.get(nombre)
+                if velocidad is not None and velocidad_previa is not None:
+                    tiempo_velocidad_anterior, valor_velocidad_anterior = velocidad_previa
+                    dt_velocidad = tiempo_s - tiempo_velocidad_anterior
+                    if dt_velocidad > 0:
+                        aceleracion = (velocidad - valor_velocidad_anterior) / dt_velocidad
+                self._estado_anterior[nombre] = (tiempo_s, posicion)
                 if velocidad is not None:
-                    anterior = self._velocidad_anterior.get(nombre)
-                    if anterior is not None:
-                        tiempo_anterior, velocidad_anterior = anterior
-                        dt = tiempo_s - tiempo_anterior
-                        if dt > 0:
-                            aceleracion = (velocidad - velocidad_anterior) / dt
                     self._velocidad_anterior[nombre] = (tiempo_s, velocidad)
-                self._muestras.append({'trayectoria': self._trayectoria, 'tiempo_s': tiempo_s, 'fuente_tiempo': fuente_tiempo, 'articulacion': nombre, 'posicion_rad': msg.position[indice], 'velocidad_rad_s': velocidad, 'aceleracion_rad_s2': aceleracion})
+                else:
+                    self._velocidad_anterior.pop(nombre, None)
+                articulaciones.append((nombre, posicion, velocidad, aceleracion))
+            if not self._capturando or not hay_movimiento:
+                return
+            for nombre, posicion, velocidad, aceleracion in articulaciones:
+                self._muestras.append({'trayectoria': self._trayectoria, 'tiempo_s': tiempo_s, 'fuente_tiempo': fuente_tiempo, 'articulacion': nombre, 'posicion_rad': posicion, 'velocidad_rad_s': velocidad, 'aceleracion_rad_s2': aceleracion})
 
     def _iniciar_captura(self, nombre: str) -> None:
         """Prepara las muestras y reinicia el cálculo de aceleraciones."""
@@ -232,7 +255,7 @@ class CapturadorTrayectorias(Node):
 
     @staticmethod
     def _guardar_csv(nombre: str, muestras: list[MuestraArticular]) -> None:
-        """Guarda las muestras con aceleración en un CSV."""
+        """Escribe solo las muestras de movimiento en un CSV independiente."""
         carpeta = Path.home() / 'ros_workspace' / 'datos_trayectorias'
         carpeta.mkdir(parents=True, exist_ok=True)
         marca_tiempo = datetime.now().strftime('%Y%m%d_%H%M%S_%f')
