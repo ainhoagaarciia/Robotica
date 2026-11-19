@@ -19,12 +19,14 @@ from rclpy.duration import Duration
 from rclpy.executors import SingleThreadedExecutor
 from rclpy.node import Node
 from rclpy.time import Time
+from robotica_msgs.msg import JointMotion
 from sensor_msgs.msg import JointState
 from tf2_ros import Buffer, TransformListener
 JOINTS = ['shoulder_pan_joint', 'shoulder_lift_joint', 'elbow_joint', 'wrist_1_joint', 'wrist_2_joint', 'wrist_3_joint']
 REFERENCE_FRAME = 'world'
 END_EFFECTOR_LINK = 'wrist_3_link'
 JOINT_STATES_TOPIC = '/joint_states'
+JOINT_MOTION_TOPIC = '/joint_motion'
 MOVE_GROUP_ACTION = 'move_action'
 EXECUTE_TRAJECTORY_ACTION = 'execute_trajectory'
 CARTESIAN_PATH_SERVICE = 'compute_cartesian_path'
@@ -73,6 +75,8 @@ class CapturadorTrayectorias(Node):
         self._velocidad_anterior: dict[str, tuple[float, float]] = {}
         self._estado_anterior: dict[str, tuple[float, float]] = {}
         self.create_subscription(JointState, JOINT_STATES_TOPIC, self._al_recibir_estado, MESSAGE_QUEUE_SIZE)
+        # Publica cada muestra capturada durante el movimiento como JointMotion.
+        self._publicador_movimiento = self.create_publisher(JointMotion, JOINT_MOTION_TOPIC, MESSAGE_QUEUE_SIZE)
         self._move_group = ActionClient(self, MoveGroup, MOVE_GROUP_ACTION)
         self._execute = ActionClient(self, ExecuteTrajectory, EXECUTE_TRAJECTORY_ACTION)
         self._cartesian = self.create_client(GetCartesianPath, CARTESIAN_PATH_SERVICE)
@@ -97,14 +101,19 @@ class CapturadorTrayectorias(Node):
         raise RuntimeError('No llegaron todas las articulaciones por /joint_states.')
 
     def _al_recibir_estado(self, msg: JointState) -> None:
-        """Guarda muestras solo mientras detecta movimiento."""
+        """Publica y guarda muestras solo mientras detecta movimiento."""
         tiempo_ns = msg.header.stamp.sec * 1000000000 + msg.header.stamp.nanosec
         fuente_tiempo = 'joint_states.header.stamp'
+        # Cabecera de los mensajes JointMotion: la misma marca de tiempo
+        # que se guarda en el CSV, para que ambos datos sean comparables.
+        sello_tiempo = copy.deepcopy(msg.header)
         if tiempo_ns == 0:
-            tiempo_ns = self.get_clock().now().nanoseconds
+            sello_tiempo.stamp = self.get_clock().now().to_msg()
+            tiempo_ns = sello_tiempo.stamp.sec * 1000000000 + sello_tiempo.stamp.nanosec
             fuente_tiempo = 'reloj_ros'
         tiempo_s = tiempo_ns / 1000000000
         articulaciones: list[tuple[str, float, float | None, float | None]] = []
+        muestras_movimiento: list[JointMotion] = []
         with self._lock:
             hay_movimiento = False
             for indice, nombre in enumerate(msg.name):
@@ -144,6 +153,21 @@ class CapturadorTrayectorias(Node):
                 return
             for nombre, posicion, velocidad, aceleracion in articulaciones:
                 self._muestras.append({'trayectoria': self._trayectoria, 'tiempo_s': tiempo_s, 'fuente_tiempo': fuente_tiempo, 'articulacion': nombre, 'posicion_rad': posicion, 'velocidad_rad_s': velocidad, 'aceleracion_rad_s2': aceleracion})
+                muestra = JointMotion()
+                muestra.header = copy.deepcopy(sello_tiempo)
+                muestra.trajectory = self._trayectoria
+                muestra.joint_name = nombre
+                muestra.position_rad = posicion
+                # Los campos float64 del mensaje no admiten None: se publica
+                # 0.0 y, para la aceleración, acceleration_valid indica si el
+                # valor es real o si aún no había una muestra anterior.
+                muestra.velocity_rad_s = velocidad if velocidad is not None else 0.0
+                muestra.acceleration_rad_s2 = aceleracion if aceleracion is not None else 0.0
+                muestra.acceleration_valid = aceleracion is not None
+                muestras_movimiento.append(muestra)
+        # Se publica fuera del lock para no bloquear la recepción de estados.
+        for muestra in muestras_movimiento:
+            self._publicador_movimiento.publish(muestra)
 
     def _iniciar_captura(self, nombre: str) -> None:
         """Prepara las muestras y reinicia el cálculo de aceleraciones."""
